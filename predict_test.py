@@ -2,7 +2,7 @@
 # predict_test.py
 import argparse
 from pathlib import Path
-
+import json
 import pandas as pd
 import nemo.collections.asr as nemo_asr
 from tqdm import tqdm
@@ -18,7 +18,8 @@ def main():
 
     # --- Load Fine-Tuned Model ---
     print(f"Loading fine-tuned model from {args.finetuned_model}...")
-    asr_model = nemo_asr.models.EncDecRNNTBPEModel.restore_from(args.finetuned_model)
+    asr_model = nemo_asr.models.ASRModel.restore_from(args.finetuned_model)
+    # asr_model = nemo_asr.models.ASRModel.from_pretrained(args.finetuned_model)
     asr_model = asr_model.to('cuda') # Move model to GPU
     asr_model.eval()
 
@@ -33,30 +34,35 @@ def main():
     # --- Run Transcription ---
     print(f"Transcribing {len(abs_paths)} test files (this may take a while)...")
     transcriptions = asr_model.transcribe(
-        paths2audio_files=abs_paths, 
-        batch_size=args.batch_size
-    )
-
-    # --- Format Submission ---
+            abs_paths, 
+            batch_size=args.batch_size
+        )
     print("Formatting submission file...")
-    # Create a lookup map from absolute path to transcription
-    # Note: asr_model.transcribe returns a list of strings in the same order as abs_paths
+    # The `transcriptions` variable is a list of Hypothesis objects
+    
     if len(abs_paths) != len(transcriptions):
         raise ValueError("Mismatch between number of files and transcriptions!")
         
-    path_to_transcript_map = dict(zip(abs_paths, transcriptions))
+    # Create a lookup map from absolute path to the Hypothesis object
+    path_to_hypothesis_map = dict(zip(abs_paths, transcriptions))
 
     # Use the submission map to get the original relative paths
     df_map = pd.read_csv(args.submission_map)
     
     final_transcripts = []
     for abs_path in df_map['absolute_path']:
-        # Find the transcript for this path
-        transcript = path_to_transcript_map.get(abs_path)
-        if transcript is None:
+        # Find the hypothesis for this path
+        hypothesis = path_to_hypothesis_map.get(abs_path)
+        
+        if hypothesis is None:
             print(f"Warning: No transcript found for {abs_path}. Using empty string.")
-            transcript = ""
-        final_transcripts.append(transcript)
+            transcript_text = ""
+        else:
+            # THIS IS THE FIX:
+            # Extract the .text attribute from the Hypothesis object
+            transcript_text = hypothesis.text
+            
+        final_transcripts.append(transcript_text)
 
     # Create the final submission dataframe
     df_submission = pd.DataFrame({
